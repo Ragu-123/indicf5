@@ -3,7 +3,7 @@ name = "indicf5-finetune"
 version = "0.1.0"
 description = "Fine-tune IndicF5 TTS for Hindi-English (Hinglish) code-switched speech"
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }
 
 dependencies = [
