@@ -23,6 +23,9 @@ import argparse
 import os
 import sys
 
+# Pop Kaggle's default TPU_PROCESS_ADDRESSES to let torch_xla auto-discover all 8 TPU cores
+os.environ.pop("TPU_PROCESS_ADDRESSES", None)
+
 import torch
 
 from f5_tts.model import CFM, DiT
