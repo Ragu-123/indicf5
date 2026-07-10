@@ -84,7 +84,9 @@ def main():
         sys.exit(1)
 
     try:
+        import datasets
         dataset = load_dataset("ragunath-ravi/TamilVoiceCorpus", name=args.subset, split=args.split)
+        dataset = dataset.cast_column("file_path", datasets.Audio(decode=False))
     except Exception as e:
         print(f"ERROR: Failed to load dataset: {e}")
         sys.exit(1)
@@ -110,8 +112,17 @@ def main():
             skipped += 1
             continue
 
-        array = audio_data.get("array", None)
-        sr = audio_data.get("sampling_rate", None)
+        import io
+        array, sr = None, None
+        try:
+            if audio_data.get("bytes") is not None:
+                array, sr = sf.read(io.BytesIO(audio_data["bytes"]))
+            elif audio_data.get("path") is not None:
+                array, sr = sf.read(audio_data["path"])
+        except Exception as e:
+            skipped += 1
+            continue
+
         if array is None or sr is None:
             skipped += 1
             continue
