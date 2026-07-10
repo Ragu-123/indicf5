@@ -368,9 +368,10 @@ class Trainer:
 
             # Debugging
             
-            print(torch.cuda.memory_allocated() / 1e9, "GB allocated")
-            print(torch.cuda.memory_reserved() / 1e9, "GB reserved")
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                print(torch.cuda.memory_allocated() / 1e9, "GB allocated")
+                print(torch.cuda.memory_reserved() / 1e9, "GB reserved")
+                torch.cuda.empty_cache()
             gc.collect()
 
         self.save_checkpoint(global_step, last=True)

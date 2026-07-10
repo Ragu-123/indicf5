@@ -38,6 +38,7 @@ dev = ["ruff", "pytest"]
 
 [project.scripts]
 prepare-data = "indicf5_finetune.prepare_data:main"
+prepare-tamil-data = "indicf5_finetune.prepare_tamil_data:main"
 train = "indicf5_finetune.train:main"
 evaluate = "indicf5_finetune.evaluate:main"
 
