@@ -20,6 +20,7 @@ Usage:
 """
 
 import argparse
+import math
 import os
 import sys
 
@@ -139,6 +140,46 @@ def freeze_backbone(model: CFM):
     print(f"  Trainable params: {trainable_count/1e6:.1f}M ({trainable_count/total*100:.1f}%)")
 
 
+class LoRALinear(torch.nn.Module):
+    def __init__(self, original_linear, r=16, lora_alpha=32, lora_dropout=0.05):
+        super().__init__()
+        self.original_linear = original_linear
+        self.original_linear.weight.requires_grad = False
+        if self.original_linear.bias is not None:
+            self.original_linear.bias.requires_grad = False
+            
+        in_features = original_linear.in_features
+        out_features = original_linear.out_features
+        
+        self.lora_A = torch.nn.Parameter(torch.zeros(r, in_features))
+        self.lora_B = torch.nn.Parameter(torch.zeros(out_features, r))
+        self.scaling = lora_alpha / r
+        
+        torch.nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        torch.nn.init.zeros_(self.lora_B)
+        
+        self.dropout = torch.nn.Dropout(p=lora_dropout)
+
+    def forward(self, x):
+        base_out = self.original_linear(x)
+        lora_out = self.dropout(x) @ self.lora_A.t() @ self.lora_B.t() * self.scaling
+        return base_out + lora_out
+
+
+def inject_lora(model: CFM, r=16, lora_alpha=32):
+    """Inject LoRALinear wrappers into all transformer block Attention projection layers."""
+    from f5_tts.model.modules import Attention
+    replaced_count = 0
+    for name, module in model.named_modules():
+        if "transformer_blocks" in name and isinstance(module, Attention):
+            module.to_q = LoRALinear(module.to_q, r=r, lora_alpha=lora_alpha)
+            module.to_k = LoRALinear(module.to_k, r=r, lora_alpha=lora_alpha)
+            module.to_v = LoRALinear(module.to_v, r=r, lora_alpha=lora_alpha)
+            module.to_out[0] = LoRALinear(module.to_out[0], r=r, lora_alpha=lora_alpha)
+            replaced_count += 4
+    print(f"  Injected {replaced_count} LoRA adapters into backbone attention blocks.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune IndicF5 on Hindi-English data")
     parser.add_argument("--data-dir", required=True, help="Path to prepared dataset")
@@ -146,6 +187,12 @@ def main():
                         help="Where to save training checkpoints")
     parser.add_argument("--freeze-backbone", action="store_true",
                         help="Freeze transformer backbone (adapter-style training)")
+    parser.add_argument("--use-lora", action="store_true",
+                        help="Inject LoRA adapters into DiT attention layers")
+    parser.add_argument("--lora-rank", type=int, default=16,
+                        help="Rank of LoRA adapters")
+    parser.add_argument("--lora-alpha", type=int, default=32,
+                        help="Alpha scaling parameter of LoRA adapters")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from last checkpoint")
     parser.add_argument("--epochs", type=int, default=50,
@@ -205,6 +252,9 @@ def main():
     print(f"  Data dir:    {data_dir}")
     print(f"  Checkpoint:  {ckpt_dir}")
     print(f"  Freeze:      {args.freeze_backbone}")
+    print(f"  Use LoRA:    {args.use_lora}")
+    if args.use_lora:
+        print(f"  LoRA Rank:   {args.lora_rank} (Alpha: {args.lora_alpha})")
     print(f"  Epochs:      {args.epochs}")
     print(f"  LR:          {args.lr}")
     print(f"  Batch (frames): {args.batch_size}")
@@ -248,8 +298,15 @@ def main():
         ckpt_path = find_indicf5_checkpoint()
         model = load_pretrained_weights(model, ckpt_path, device="cpu")
 
-    # 4. Optionally freeze backbone
-    if args.freeze_backbone:
+    # 4. Optionally freeze backbone / inject LoRA
+    if args.use_lora:
+        print("Freezing backbone and injecting LoRA adapters ...")
+        freeze_backbone(model)
+        inject_lora(model, r=args.lora_rank, lora_alpha=args.lora_alpha)
+        if args.lr == 1e-5:
+            args.lr = 1e-4
+            print(f"  Auto-adjusted LR to {args.lr} for LoRA training")
+    elif args.freeze_backbone:
         print("Freezing transformer backbone ...")
         freeze_backbone(model)
         if args.lr == 1e-5:
